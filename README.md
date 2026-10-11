@@ -1,16 +1,16 @@
 # opencode-tower-workflow
 
-An OpenCode Tower workflow bundle with a controller and two model-capability-tier agents. The agents are model-agnostic; bind the desired models in OpenChamber.
+OpenCode Tower 工作流套件，包含一个控制器和两个按模型能力分层的 Agent。这些 Agent 不绑定特定模型；请在 OpenChamber 中为它们配置所需模型。
 
-## Contents
+## 内容
 
-- `agents/tower-controller.md` — coordinates scope, routing, work tracking, and reviews.
-- `agents/tower-high-capability.md` — handles feature discovery, Specs/Plans, reviews, and escalated implementation.
-- `agents/tower-lightweight.md` — handles bounded implementation and verification.
-- `docs/` — dated workflow design, Specs, Plans, and operating records.
-- `tests/2026-10-09-tower-agent-config-smoke-test.py` — checks agent discovery, prompt contracts, routing, and permissions.
+- `agents/tower-controller.md` — 负责协调任务范围、路由、进度跟踪和审查。
+- `agents/tower-high-capability.md` — 负责功能探索、Spec/Plan 编写、审查以及升级处理的实现任务。
+- `agents/tower-lightweight.md` — 负责范围明确的实现与验证。
+- `docs/` — 按日期归档的工作流设计、Spec、Plan 和运行记录。
+- `tests/2026-10-09-tower-agent-config-smoke-test.py` — 检查 Agent 发现、提示词契约、任务路由和权限配置。
 
-The smoke test checks OpenCode agent discovery and configuration; it does not run models or prove model-backed delegation. Run it against an isolated temporary config so existing agents are not changed:
+此冒烟测试会检查 OpenCode 的 Agent 发现和配置；它不会运行模型，也不能证明基于模型的委派功能正常。请使用隔离的临时配置运行，以免修改现有 Agent：
 
 ```bash
 test_config="$(mktemp -d)"
@@ -19,8 +19,8 @@ cp agents/*.md "$test_config/agents/"
 OPENCODE_CONFIG_DIR="$test_config" python3 tests/2026-10-09-tower-agent-config-smoke-test.py
 ```
 
-To install with the workflow kit, run its installer or clone this repository and copy `agents/*.md` into `~/.config/opencode/agents/`.
+如需通过 workflow kit 安装，请运行其安装程序；也可以克隆本仓库，并将 `agents/*.md` 复制到 `~/.config/opencode/agents/`。
 
-## License
+## 许可证
 
-MIT. See `LICENSE`.
+MIT。详见 `LICENSE`。
