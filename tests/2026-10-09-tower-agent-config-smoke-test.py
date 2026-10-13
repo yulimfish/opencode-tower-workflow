@@ -12,6 +12,7 @@ from pathlib import Path
 
 
 COMMAND = ["opencode", "debug", "agents", "--log-level", "debug", "--print-logs"]
+AGENT_SOURCE_DIR = Path(__file__).resolve().parents[1] / "agents"
 EXPECTED_MODES = {
     "tower-controller": "primary",
     "tower-high-capability": "subagent",
@@ -19,10 +20,14 @@ EXPECTED_MODES = {
 }
 REQUIRED_PROMPT_MARKERS = {
     "tower-controller": (
-        "任何新 Feature",
-        "清楚、范围有限、低风险的非 Feature 任务",
-        "其他高难度非 Feature 任务",
-        "先从用户请求提取目标、范围、验收标准、风险和是否引入新行为，再选择路径",
+        "先从用户请求提取目标、范围、验收标准、风险和依赖，再由你按任务实际所需的推理深度选择能力档位",
+        "轻量工作默认交给 `tower-lightweight`",
+        "调研、资料检索、事实核查、信息整理",
+        "只有确实需要深度推理时才使用 `tower-high-capability`",
+        "任务类别或风险标签本身都不自动升档",
+        "新 Feature 按实际推理深度路由",
+        "简单且范围明确的 Feature 交给 `tower-lightweight`",
+        "高风险但无需深度推理的工作仍用轻量档",
         "通知，不是审批请求",
         "最终审计",
         "为每个可独立委派的子任务分配会话内唯一的 Work ID",
@@ -34,7 +39,7 @@ REQUIRED_PROMPT_MARKERS = {
         "Spec/Plan 阶段的验证证据是产物核验，不表示实现测试已执行",
         "只并行派发互不依赖的工作项",
         "多项并行时逐项跟踪，不能因一个子任务完成就把整批标为完成",
-        "除该升级情形外，高能力 Agent 默认负责 Spec/Plan，轻量 Agent 默认负责 Build/Test/Fix/Retest",
+        "高能力档仅在任务确需深度推理时使用，轻量 Agent 默认承担其余工作",
         "按 Work ID 记录失败指纹（已知根因；尚未定位时用失败测试/命令和稳定错误现象）",
         "一次独立尝试指一轮实质性实现/修正及其对应验证；同一轮中重复出现的日志或报错只计一次",
         "同一失败指纹第 3 次失败，立即触发“显性监督失败”",
@@ -49,16 +54,26 @@ REQUIRED_PROMPT_MARKERS = {
         "`REVISE`",
         "`BLOCKED`",
         "route Build to `tower-lightweight`",
-        "route Build to `tower-high-capability`",
+        "仅当 Build 确需深度推理时 route to `tower-high-capability`",
+        "普通 Build/Test/Fix/Retest 的首轮都交给轻量档",
+        "任务复杂、高风险、Plan 曾由强模型编写，或要求独立审计，都不单独构成首轮升档理由",
+        "同一 Work ID、同一失败指纹累计到第 3 次独立失败后",
+        "评审的**上下文独立性**与**模型档位**是两个决定",
+        "要求 fresh context 或两遍审计本身不等于必须用强模型",
+        "范围窄、标准清晰、低风险的审计可交给 `tower-lightweight`",
+        "只有审计本身确需深度安全/领域推理，或轻量审计无法给出有证据的结论时",
+        "首轮 Build 仍 route to `tower-lightweight`",
+        "高风险 verdict 不绕过轻量首轮",
         "return to Spec/Plan",
         "do not start Build",
         "stop and report the blocker",
-        "scan for relevant omissions and regressions",
-        "trace each original requirement",
-        "trace every original requirement from Spec through implementation to test/verification evidence",
-        "out-of-scope ideas as deferred",
-        "Before Build, assign `tower-high-capability` to review the Spec/Plan in a separate task/context",
-        "After Build, assign `tower-high-capability` to perform the post-Build review in a separate task/context",
+        "按核查所需推理深度选择 Agent",
+        "只有确需深度推理时才用 `tower-high-capability`，否则用 `tower-lightweight`",
+        "先查遗漏、缺陷和回归",
+        "逐项追踪原始需求、验收标准、实现及测试/验证证据",
+        "范围外想法记为 deferred",
+        "按评审所需推理深度选择 Agent",
+        "标准评审用 `tower-lightweight`",
         "For an in-scope omission, defect, or regression, perform a focused Fix",
         "repeat the independent two-pass review",
         "When an original-request requirement is omitted from the Spec, revise the Spec/Plan",
@@ -66,7 +81,13 @@ REQUIRED_PROMPT_MARKERS = {
         "Do not mark complete while any required criterion remains unmet",
     ),
     "tower-high-capability": (
-        "Every new Feature, regardless of apparent size",
+        "Features Tower routes to you for deep design reasoning",
+        "Do not infer a need for high-tier work from the Feature label or size alone",
+        "Reasoning Discipline",
+        "precise, decision-relevant breadth and depth—not sheer volume",
+        "Be comprehensive about relevant dimensions, not exhaustive for its own sake",
+        "Do not repeat unchanged reasoning",
+        "materially reduce uncertainty",
         "Do not assume that you only write plans.",
         "brainstorming",
         "Spec and an actionable Plan",
@@ -75,6 +96,11 @@ REQUIRED_PROMPT_MARKERS = {
         "If Tower did not provide a Work ID, do not invent one or begin substantive work; report `blocked` to Tower",
         "The high-capability tier is usually assigned Spec/Plan, but an explicit `显性监督失败` escalation makes it the owner of root-cause analysis and Build/Fix/Retest.",
         "On escalation, inspect the handed-off failure signature, attempts, evidence and current artifacts; implement a fix and run relevant verification rather than returning only a plan.",
+        "Build routing guard",
+        "evidence of the third independent failure",
+        "return the assignment to Tower for the lightweight first-pass route",
+        "Review tier is selected by Tower according to the review's scope and reasoning needs",
+        "independence or a two-pass format alone does not require the high-capability tier",
         "Diverge",
         "Compare",
         "Converge",
@@ -101,6 +127,11 @@ REQUIRED_PROMPT_MARKERS = {
         "If Tower did not provide a Work ID, do not invent one or begin substantive work; report `blocked` to Tower",
         "In reports to Tower, include a concise failure signature, independently attempted fixes and evidence; repeated log lines within one attempt are not separate attempts.",
         "If Tower escalates the Work ID under `显性监督失败`, stop repeating the same fix strategy and hand off; do not continue low-tier retries unless Tower explicitly reassigns the work.",
+        "On the third independent failure with the same fingerprint under the same Work ID",
+        "stop before a fourth low-tier attempt",
+        "Failures with distinct fingerprints do not accumulate toward this threshold.",
+        "a narrow, low-risk audit with clear acceptance criteria is appropriate for this tier",
+        "independence or a two-pass checklist alone does not require a strong-model reviewer",
         "implement only the approved acceptance criteria",
         "do not silently expand scope",
         "report behavior-preserving Plan changes to Tower",
@@ -111,18 +142,24 @@ REQUIRED_PROMPT_MARKERS = {
 REQUIRED_PROMPT_SEQUENCES = {
     "tower-controller": (
         (
-            "1. **任何新 Feature",
-            "`tower-high-capability` 做头脑风暴、详细 Spec 和 Plan",
-            "`tower-lightweight` 完成 Build/Test/Fix/Retest",
+            "轻量工作默认交给 `tower-lightweight`",
+            "调研、资料检索、事实核查、信息整理",
         ),
         (
-            "2. **清楚、范围有限、低风险的非 Feature 任务**",
-            "`tower-lightweight` 从分析到验证端到端完成",
+            "新 Feature 按实际推理深度路由",
+            "简单且范围明确的 Feature 交给 `tower-lightweight`",
+            "确实需要深度设计的 Feature 才交给 `tower-high-capability`",
+            "做详细 Spec/Plan",
+            "再由轻量档 Build/Test/Fix/Retest",
         ),
         (
-            "3. **其他高难度非 Feature 任务**",
-            "`tower-high-capability` 深入分析并 Plan",
-            "`tower-lightweight` Build/Test/Fix/Retest",
+            "只有确实需要深度推理时才使用 `tower-high-capability`",
+            "Build 默认交给 `tower-lightweight`",
+        ),
+        (
+            "Build 默认交给 `tower-lightweight`",
+            "普通 Build/Test/Fix/Retest 的首轮都交给轻量档",
+            "同一 Work ID、同一失败指纹累计到第 3 次独立失败后",
         ),
         (
             "Spec、Plan、Build、Test、Fix、Retest 等里程碑汇报是**通知，不是审批请求**",
@@ -162,7 +199,11 @@ REQUIRED_PROMPT_SEQUENCES = {
         ),
         (
             "`PASS_HIGH_RISK`",
-            "route Build to `tower-high-capability`",
+            "首轮 Build 仍 route to `tower-lightweight`",
+            "仅当 Build 确需深度推理时 route to `tower-high-capability`",
+            "同一 Work ID 下同一失败指纹第 3 次独立失败",
+            "高风险 verdict 不绕过轻量首轮",
+            "否则交给 `tower-lightweight`",
         ),
         (
             "`REVISE`",
@@ -174,19 +215,21 @@ REQUIRED_PROMPT_SEQUENCES = {
             "stop and report the blocker",
         ),
         (
-            "scan for relevant omissions and regressions",
-            "trace every original requirement from Spec through implementation to test/verification evidence",
-            "out-of-scope ideas as deferred",
+            "先查遗漏、缺陷和回归",
+            "再逐项追踪原始需求、验收标准、实现及测试/验证证据",
+            "范围外想法记为 deferred",
         ),
         (
-            "Before Build",
-            "assign `tower-high-capability` to review the Spec/Plan in a separate task/context",
-            "before any verdict-to-Builder route",
+            "在开始 Build 前安排独立上下文的 Spec/Plan 评审",
+            "按评审所需推理深度选择 Agent",
+            "标准评审用 `tower-lightweight`",
         ),
         (
-            "After Build",
-            "assign `tower-high-capability` to perform the post-Build review in a separate task/context",
-            "before the existing two review passes",
+            "Build 完成后",
+            "按核查所需推理深度选择 Agent",
+            "只有确需深度推理时才用 `tower-high-capability`",
+            "否则用 `tower-lightweight`",
+            "独立核查仍执行两遍",
         ),
         (
             "For an in-scope omission, defect, or regression",
@@ -207,6 +250,13 @@ REQUIRED_PROMPT_SEQUENCES = {
         ),
     ),
     "tower-high-capability": (
+        (
+            "Reasoning Discipline",
+            "precise, decision-relevant breadth and depth—not sheer volume",
+            "Compare the useful angles against the request and available evidence",
+            "Do not repeat unchanged reasoning",
+            "otherwise synthesize and move on",
+        ),
         (
             "Diverge",
             "Compare",
@@ -281,8 +331,15 @@ def main():
             continue
         if agent.get("mode") != mode:
             failures.append(f"{agent_id}: expected mode {mode}, got {agent.get('mode')}")
-        if "model" in agent:
-            failures.append(f"{agent_id}: model must remain unassigned")
+        source = (AGENT_SOURCE_DIR / f"{agent_id}.md").read_text()
+        frontmatter = source.split("---", 2)
+        if len(frontmatter) != 3:
+            failures.append(f"{agent_id}: source frontmatter is missing or malformed")
+        elif any(
+            row.partition(":")[0].strip() == "model"
+            for row in frontmatter[1].splitlines()
+        ):
+            failures.append(f"{agent_id}: model must not be pinned in source frontmatter")
         prompt = agent.get("system", "")
         for marker in REQUIRED_PROMPT_MARKERS[agent_id]:
             if marker not in prompt:

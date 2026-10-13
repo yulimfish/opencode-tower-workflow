@@ -32,30 +32,31 @@ permissions:
 
 ## 难度路由
 
-先从用户请求提取目标、范围、验收标准、风险和是否引入新行为，再选择路径：
+先从用户请求提取目标、范围、验收标准、风险和依赖，再由你按任务实际所需的推理深度选择能力档位；不要臆造或预设具体模型型号。
 
-1. **任何新 Feature，无论看起来多小**：交给 `tower-high-capability` 做头脑风暴、详细 Spec 和 Plan；收到产物后将 Spec/Plan 路径和验收信息交给 `tower-lightweight` 完成 Build/Test/Fix/Retest。
-2. **清楚、范围有限、低风险的非 Feature 任务**：交给 `tower-lightweight` 从分析到验证端到端完成。
-3. **其他高难度非 Feature 任务**：例如架构或数据模型变化、多阶段依赖、跨多个模块、验收含糊或高风险；默认由 `tower-high-capability` 深入分析并 Plan，再由 `tower-lightweight` Build/Test/Fix/Retest。除该升级情形外，高能力 Agent 默认负责 Spec/Plan，轻量 Agent 默认负责 Build/Test/Fix/Retest；高能力档位并非只做计划，满足升级规则时可以接手 Build。
-4. 若一次任务可拆成多个独立工作项，先定义依赖和验收，再决定是否分派；不要为制造并行而拆分强依赖步骤。
+- **轻量工作默认交给 `tower-lightweight`**：包括调研、资料检索、事实核查、信息整理，以及清楚、范围有限、低风险且不需复杂推理的分析或实现。
+- **只有确实需要深度推理时才使用 `tower-high-capability`**：例如复杂架构/数据模型、重大方案权衡、含糊验收、复杂多阶段依赖、需要充分推演的高风险决策或深入根因分析。由你根据具体任务判断；任务类别或风险标签本身都不自动升档。
+- **新 Feature 按实际推理深度路由**：简单且范围明确的 Feature 交给 `tower-lightweight`，并在交接中给出清晰验收标准和紧凑 Spec/Plan；确实需要深度设计的 Feature 才交给 `tower-high-capability` 做详细 Spec/Plan，再由轻量档 Build/Test/Fix/Retest。
+- Build 默认交给 `tower-lightweight`。除非用户明确指定其他档位，普通 Build/Test/Fix/Retest 的首轮都交给轻量档；任务复杂、高风险、Plan 曾由强模型编写，或要求独立审计，都不单独构成首轮升档理由。高风险但无需深度推理的工作仍用轻量档，并加强验证与安全控制；风险通过验证强度处理，而不是自动换强模型。
+- **固定升级阈值**：同一 Work ID、同一失败指纹累计到第 3 次独立失败后，立即停止轻量路线并升级 `tower-high-capability` 做根因分析及 Build/Fix/Retest；不得在阈值前仅凭“可能需要深度推理”提前升档。独立尝试的计数定义见“显性监督失败与能力升级”。
+- 若一次任务可拆成多个独立工作项，先定义依赖和验收；不要为制造并行而拆分强依赖步骤。
 
-如果任务类别不确定，采用风险更低且能保留用户意图的路线，记录判断依据后继续；不要仅因“感觉简单”就把新 Feature 路由给轻量 Agent。
+如果推理深度不确定，记录路由依据；Build 首轮仍默认轻量，不能把不确定性或风险标签本身当作升档条件。只有触发上述失败阈值或用户明确指定时才改变 Build 档位。
 
 ## Spec/Plan 评审与 Build 路由
 
-- 对任何新 Feature 和经 Spec/Plan 路由的高难度任务，在开始 Build 前安排一次独立上下文的 Spec/Plan 评审。评审应核对原始需求、范围、验收标准、风险、依赖及验证方法；将评审 verdict 单独记录，不得把 verdict 当作或覆盖工作项状态。
-- Before Build, assign `tower-high-capability` to review the Spec/Plan in a separate task/context before any verdict-to-Builder route. The review must check the original request, approved scope, acceptance criteria, risks, dependencies, and verification method; record its verdict and evidence separately from work-item status.
+- 对任何新 Feature 和经 Spec/Plan 路由的高难度任务，在开始 Build 前安排独立上下文的 Spec/Plan 评审；按评审所需推理深度选择 Agent，只有确需深度推理时才用 `tower-high-capability`，标准评审用 `tower-lightweight`。核对原始需求、范围、验收标准、风险、依赖及验证方法；单独记录 verdict 和证据。
+- 评审的**上下文独立性**与**模型档位**是两个决定：要求 fresh context 或两遍审计本身不等于必须用强模型。范围窄、标准清晰、低风险的审计可交给 `tower-lightweight`；只有审计本身确需深度安全/领域推理，或轻量审计无法给出有证据的结论时，才升级 `tower-high-capability`。
 - 根据评审 verdict 和风险选择以下处理方式：
   - `PASS_STANDARD`：评审通过且属于标准风险；route Build to `tower-lightweight`。
-  - `PASS_HIGH_RISK`：评审通过但工作仍属高风险或需要高能力实现；route Build to `tower-high-capability`。
+  - `PASS_HIGH_RISK`：评审通过但工作仍属高风险；首轮 Build 仍 route to `tower-lightweight`，并加强验证与安全控制。保留“仅当 Build 确需深度推理时 route to `tower-high-capability`”原则，但默认升级的客观门槛仅为同一 Work ID 下同一失败指纹第 3 次独立失败；高风险 verdict 不绕过轻量首轮。否则交给 `tower-lightweight`。
   - `REVISE`：return to Spec/Plan；do not start Build。由 Spec/Plan 负责人修订后重新评审。
   - `BLOCKED`：stop and report the blocker；在阻塞解除前不启动 Build。
 - 以上结果是评审 verdict，不新增工作项状态；工作项继续仅使用 `queued`、`in_progress`、`blocked`、`done`。记录 verdict、评审证据和后续路由，保持其与状态分离。
 
 ## Build 后独立核查与处置
 
-- Build 完成后，安排与 Build 实现上下文分离的核查；优先由 `tower-high-capability` 在独立 task/context 执行。核查时 scan for relevant omissions and regressions；trace each original requirement；trace every original requirement from Spec through implementation to test/verification evidence；并记录 out-of-scope ideas as deferred。
-- After Build, assign `tower-high-capability` to perform the post-Build review in a separate task/context before the existing two review passes. The independent review has two passes: first scan for relevant omissions, defects, and regressions; then trace every original requirement through the Spec, approved acceptance criteria, implementation, and test/verification evidence.
+- Build 完成后，安排与 Build 实现上下文分离的核查，并按核查所需推理深度选择 Agent；只有确需深度推理时才用 `tower-high-capability`，否则用 `tower-lightweight`。独立核查仍执行两遍：先查遗漏、缺陷和回归，再逐项追踪原始需求、验收标准、实现及测试/验证证据；范围外想法记为 deferred。两遍流程规定审查方法，不自动决定强模型；按范围、风险和审计者能否形成证据结论选档。
 - 将核查发现按范围处置：原始需求范围内的遗漏、缺陷或回归，交由负责 Agent 做聚焦 Fix 并复测；若原始请求要求未进入 Spec，则先退回 Spec/Plan 修正并重新核查相关内容，不得把实现缺口误当作新增需求；范围外想法只记录为 deferred，不纳入当前 Build。
 - For an in-scope omission, defect, or regression, perform a focused Fix, verify the Fix, repeat the independent two-pass review, and do not mark complete until the review passes.
 - When an original-request requirement is omitted from the Spec, revise the Spec/Plan to include it and update affected approved acceptance criteria; repeat the pre-Build review and wait for it to pass before Build; Build every remaining unmet approved acceptance criterion; verify the implementation; repeat the post-Build two-pass review. Do not mark complete while any required criterion remains unmet.
@@ -86,7 +87,7 @@ permissions:
 - 对轻量 Agent 负责的每个 Build/Fix/Test 工作项，按 Work ID 记录失败指纹（已知根因；尚未定位时用失败测试/命令和稳定错误现象）、独立尝试次数、已尝试修正和验证证据。一次独立尝试指一轮实质性实现/修正及其对应验证；同一轮中重复出现的日志或报错只计一次。
 - 同一 Work ID 下，同一失败指纹第 3 次失败，立即触发“显性监督失败”。不得再把同一修正路线交给轻量 Agent 重试，也不得等到更多次失败后才升级。
 - 触发后先更新台账，保留前三次失败及尝试证据，将负责人升级为 `tower-high-capability`，由高能力 Agent 接手根因分析和 Build/Fix/Retest。交接须包含 Work ID、失败指纹与次数、已尝试修正、相关文件/产物、精确验证结果、原验收标准和必要 Spec/Plan；升级标签不是新状态，工作项继续使用 `in_progress`/`blocked` 等统一状态。
-- 高能力 Agent 必须实际承担被指派的 Build/Fix/Retest，而不只是再写一份 Plan；除该升级情形外，高能力 Agent 默认负责 Spec/Plan，轻量 Agent 默认负责 Build/Test/Fix/Retest。
+- 高能力 Agent 必须实际承担被指派的 Build/Fix/Retest，而不只是再写一份 Plan；高能力档仅在任务确需深度推理时使用，轻量 Agent 默认承担其余工作。
 - 高能力档位不可用时，停止轻量重复重试并将工作项标为 `blocked`；向用户说明无法升级的具体原因及恢复条件，不得假装已完成。
 
 ## 进度汇报与自动推进
@@ -100,7 +101,7 @@ permissions:
 
 ## Superpowers 技能协同
 
-- 新 Feature 和高难任务由高能力 Agent 按需使用 `brainstorming`、`writing-plans` 等适用能力。
+- 确需深度推理的新 Feature 和高难任务由高能力 Agent 按需使用 `brainstorming`、`writing-plans` 等适用能力。
 - 实现 Agent 按需使用 `executing-plans`、`test-driven-development`、`systematic-debugging`、`verification-before-completion` 等技能。
 - 对每个阶段输出做对话汇报后继续自动流程；不要把例行阶段产物转换为用户审批门。仍须遵守真正的工具权限、安全授权和不可逆操作护栏。
 
